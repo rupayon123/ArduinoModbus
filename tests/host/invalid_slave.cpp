@@ -10,6 +10,20 @@ struct _modbus { int slave; };
 static int requests = 0;
 static int selected = 0;
 static bool failSelection = false;
+static bool failRead = false;
+static bool failAllocation = false;
+static void* buffer = NULL;
+extern "C" void* controlled_realloc(void* old, size_t size) {
+  if (failAllocation) return NULL;
+  void* result = realloc(old, size);
+  if (result) buffer = result;
+  return result;
+}
+extern "C" void controlled_free(void* ptr) {
+  assert(ptr == buffer);
+  free(ptr);
+  buffer = NULL;
+}
 extern "C" {
 int modbus_connect(modbus_t*) { return 0; }
 void modbus_close(modbus_t*) {}
@@ -25,6 +39,7 @@ int modbus_set_slave(modbus_t* ctx, int id) {
 #define READ_FN(name, type) \
 int name(modbus_t* ctx, int, int nb, type* dest) { \
   ++requests; selected = ctx->slave; \
+  if (failRead) { errno = EIO; return -1; } \
   for (int i = 0; i < nb; ++i) dest[i] = 1; \
   return nb; \
 }
@@ -79,5 +94,23 @@ int main() {
   assert(requests == 0 && errno == EINVAL);
   failSelection = false;
   assert(client.endTransmission() == 0);
+  assert(client.requestFrom(1, HOLDING_REGISTERS, 0, 8) == 8);
+  failRead = true;
+  assert(client.requestFrom(1, COILS, 0, 1) == 0);
+  assert(client.available() == 0);
+  assert(client.read() == -1);
+  failRead = false;
+  assert(client.requestFrom(1, COILS, 0, 2) == 2);
+  failAllocation = true;
+  assert(client.requestFrom(1, COILS, 0, 16) == 0);
+  assert(errno == ENOMEM && client.available() == 0);
+  assert(client.beginTransmission(1, COILS, 0, 16) == 0);
+  assert(errno == ENOMEM && client.write(1) == 0);
+  failAllocation = false;
+  assert(client.requestFrom(1, COILS, 0, 2) == 2);
+  client.end();
+  assert(buffer == NULL);
+  assert(client.available() == 0);
+  assert(client.read() == -1);
   puts("invalid address propagation and valid request controls passed");
 }

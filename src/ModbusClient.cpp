@@ -77,6 +77,12 @@ int ModbusClient::begin(modbus_t* mb, int defaultId)
 
 void ModbusClient::end()
 {
+  _transmissionBegun = false;
+  _available = 0;
+  _read = 0;
+  _availableForWrite = 0;
+  _written = 0;
+
   if (_values != NULL) {
     free(_values);
 
@@ -244,13 +250,21 @@ int ModbusClient::beginTransmission(int id, int type, int address, int nb)
 
   int valueSize = (type == COILS) ? sizeof(uint8_t) : sizeof(uint16_t);
 
-  _values = realloc(_values, nb * valueSize);
+  // A new transfer invalidates the old read/write view before resizing it.
+  _transmissionBegun = false;
+  _available = 0;
+  _read = 0;
+  _availableForWrite = 0;
+  _written = 0;
 
-  if (_values == NULL) {
+  void* values = realloc(_values, nb * valueSize);
+
+  if (values == NULL) {
     errno = ENOMEM;
 
     return 0;
   }
+  _values = values;
 
   memset(_values, 0x00, nb * valueSize);
 
@@ -344,13 +358,21 @@ int ModbusClient::requestFrom(int id, int type, int address, int nb)
 
   int valueSize = (type == COILS || type == DISCRETE_INPUTS) ? sizeof(uint8_t) : sizeof(uint16_t);
 
-  _values = realloc(_values, nb * valueSize);
+  // A new transfer invalidates the old read/write view before resizing it.
+  _transmissionBegun = false;
+  _available = 0;
+  _read = 0;
+  _availableForWrite = 0;
+  _written = 0;
 
-  if (_values == NULL) {
+  void* values = realloc(_values, nb * valueSize);
+
+  if (values == NULL) {
     errno = ENOMEM;
 
     return 0;
   }
+  _values = values;
 
   int result = -1;
 
